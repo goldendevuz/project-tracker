@@ -1,0 +1,67 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: project_tracker_db_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-projectuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-projectpass}
+      POSTGRES_DB: ${POSTGRES_DB:-projectdb}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-projectuser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - project_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: project_tracker_backend_prod
+    restart: always
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-projectuser}:${POSTGRES_PASSWORD:-projectpass}@db:5432/${POSTGRES_DB:-projectdb}
+      SQL_ECHO: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - project_network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  nginx:
+    image: nginx:alpine
+    container_name: project_tracker_nginx_prod
+    restart: always
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+    networks:
+      - project_network
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: project_tracker_tunnel
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+    networks:
+      - project_network
+
+volumes:
+  postgres_data_prod:
+
+networks:
+  project_network:
+    driver: bridge

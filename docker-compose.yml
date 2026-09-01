@@ -1,0 +1,60 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: project_tracker_db
+    environment:
+      POSTGRES_USER: projectuser
+      POSTGRES_PASSWORD: projectpass
+      POSTGRES_DB: projectdb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5438:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U projectuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - project_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: project_tracker_backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://projectuser:projectpass@db:5432/projectdb
+      SQL_ECHO: "false"
+    ports:
+      - "8088:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - project_network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  nginx:
+    image: nginx:alpine
+    container_name: project_tracker_nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - project_network
+
+volumes:
+  postgres_data:
+
+networks:
+  project_network:
+    driver: bridge
